@@ -1,0 +1,11 @@
+streamlit
+beautifulsoup4
+requests
+pdfplumber
+python-dotenv
+openai==0.28.1
+sentence-transformers
+faiss-cpu
+numpy
+scikit-learn
+torch
