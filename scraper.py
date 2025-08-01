@@ -1,9 +1,10 @@
-# scraper.py - Simple approach: Body content only
+# enhanced_scraper.py - Enhanced scraper that captures hidden/collapsed content
 import requests
 from bs4 import BeautifulSoup
 import json
 from urllib.parse import urljoin
 import time
+import re
 
 # Load URLs from scrape_urls.json
 with open("scrape_urls.json") as f:
@@ -122,15 +123,88 @@ def is_likely_course_link(href, text):
     
     return has_course_url or has_course_text
 
+def extract_all_content_including_hidden(body_content):
+    """Extract all content including hidden/collapsed sections"""
+    if not body_content:
+        return ""
+    
+    # Get all text including hidden content
+    all_text = body_content.get_text(separator=' ', strip=True)
+    
+    # Also look for specific collapsed content patterns
+    collapsed_content = []
+    
+    # Look for common collapse/accordion patterns
+    collapse_selectors = [
+        '.collapse', '.accordion', '.collapsible', 
+        '[data-toggle="collapse"]', '[aria-expanded]',
+        '.tab-content', '.tab-pane', '.hidden', '.show-more'
+    ]
+    
+    for selector in collapse_selectors:
+        elements = body_content.select(selector)
+        for element in elements:
+            collapsed_text = element.get_text(separator=' ', strip=True)
+            if collapsed_text and len(collapsed_text) > 20:
+                collapsed_content.append(collapsed_text)
+    
+    # Combine all content
+    combined_content = all_text
+    if collapsed_content:
+        combined_content += " " + " ".join(collapsed_content)
+    
+    return combined_content
+
+def extract_detailed_curriculum(body_content):
+    """Extract detailed curriculum information including hidden sections"""
+    if not body_content:
+        return []
+    
+    curriculum_data = []
+    
+    # Get all text content including hidden sections
+    full_text = extract_all_content_including_hidden(body_content)
+    
+    # Look for curriculum patterns
+    curriculum_patterns = [
+        r'semester\s+\d+[:\-]?\s*([^.]+(?:\.[^.]+){0,10})',
+        r'year\s+\d+[:\-]?\s*([^.]+(?:\.[^.]+){0,10})',
+        r'module\s+\d+[:\-]?\s*([^.]+(?:\.[^.]+){0,5})',
+        r'course\s+structure[:\-]?\s*([^.]+(?:\.[^.]+){0,15})'
+    ]
+    
+    for pattern in curriculum_patterns:
+        matches = re.findall(pattern, full_text, re.IGNORECASE | re.DOTALL)
+        for match in matches:
+            if len(match.strip()) > 20:  # Only substantial content
+                curriculum_data.append(match.strip())
+    
+    # Look for subject lists
+    subject_lines = []
+    lines = full_text.split('\n')
+    for line in lines:
+        line_clean = line.strip()
+        # Look for lines that might be subjects
+        if (len(line_clean) > 10 and len(line_clean) < 100 and 
+            not line_clean.startswith('http') and
+            any(subject_word in line_clean.lower() for subject_word in 
+                ['design', 'research', 'psychology', 'engineering', 'management', 'analysis', 'development'])):
+            subject_lines.append(line_clean)
+    
+    if subject_lines:
+        curriculum_data.extend(subject_lines[:10])  # Limit to 10 most relevant
+    
+    return curriculum_data
+
 def extract_course_info_from_page(course_url, original_text, source_url):
-    """Extract course info from individual course page (Title + Body only)"""
-    print(f"Getting course info from: {course_url}")
+    """Extract comprehensive course info including hidden content"""
+    print(f"Getting detailed course info from: {course_url}")
     
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(course_url, headers=headers, timeout=10)
+        response = requests.get(course_url, headers=headers, timeout=15)
         response.raise_for_status()
     except Exception as e:
         print(f"Error fetching course page {course_url}: {e}")
@@ -142,15 +216,21 @@ def extract_course_info_from_page(course_url, original_text, source_url):
     title_elem = soup.find('title') or soup.find('h1')
     course_title = title_elem.get_text(strip=True) if title_elem else original_text
     
-    # Clean up title (remove site name, etc.)
+    # Clean up title
     course_title = clean_course_title(course_title)
     
     # Remove navigation from body
     soup = remove_navigation_elements(soup)
     body_content = get_body_content(soup)
     
-    # Extract subjects from body content
-    subjects = extract_subjects_from_body(body_content)
+    # Extract subjects from body content (including hidden)
+    subjects = extract_subjects_from_body_enhanced(body_content)
+    
+    # Extract detailed curriculum including hidden sections
+    curriculum = extract_detailed_curriculum(body_content)
+    
+    # Extract comprehensive course description
+    description = extract_course_description(body_content)
     
     # Determine degree category
     degree_category = determine_degree_category(source_url, course_title, body_content)
@@ -159,15 +239,67 @@ def extract_course_info_from_page(course_url, original_text, source_url):
         'course': course_title,
         'degree': degree_category,
         'subjects': subjects,
+        'curriculum': curriculum,
+        'description': description,
         'source_url': course_url
     }
 
+def extract_subjects_from_body_enhanced(body_content):
+    """Enhanced subject extraction including hidden content"""
+    if not body_content:
+        return []
+    
+    subjects = []
+    
+    # Get all text including hidden sections
+    full_text = extract_all_content_including_hidden(body_content).lower()
+    
+    # Enhanced subject keywords
+    subject_keywords = [
+        'accounting', 'finance', 'economics', 'business management',
+        'marketing', 'taxation', 'banking', 'statistics',
+        'graphic design', 'animation', 'ui/ux design', 'web design',
+        'multimedia', 'photography', 'video editing', 'interaction design',
+        'user experience', 'human-centered design', 'design thinking',
+        'prototyping', 'usability', 'cognitive psychology',
+        'physical education', 'sports science', 'exercise physiology',
+        'sports psychology', 'anatomy', 'physiology', 'research methods',
+        'ethnographic methods', 'complexity science', 'human factors',
+        'ergonomics', 'modeling', 'simulation', 'accessibility',
+        'sustainability', 'cross-cultural', 'emerging technologies',
+        'social innovation'
+    ]
+    
+    for keyword in subject_keywords:
+        if keyword in full_text:
+            subjects.append(keyword.title())
+    
+    return list(set(subjects))  # Remove duplicates
+
+def extract_course_description(body_content):
+    """Extract comprehensive course description"""
+    if not body_content:
+        return ""
+    
+    # Get first few paragraphs as description
+    paragraphs = body_content.find_all('p')
+    description_parts = []
+    
+    for p in paragraphs[:5]:  # First 5 paragraphs
+        text = p.get_text(strip=True)
+        if len(text) > 50:  # Only substantial paragraphs
+            description_parts.append(text)
+    
+    return " ".join(description_parts)[:500]  # Limit to 500 chars
+
 def create_fallback_course_info(original_text, course_url, source_url):
-    """Create course info when individual page can't be accessed"""
+    """Create minimal course info when page can't be accessed"""
     return {
         'course': clean_course_title(original_text),
         'degree': determine_degree_category(source_url, original_text, None),
         'subjects': [],
+        'curriculum': [],
+        'description': "",
         'source_url': course_url
     }
 
@@ -190,30 +322,6 @@ def clean_course_title(title):
     title = ' '.join(title.split())
     
     return title
-
-def extract_subjects_from_body(body_content):
-    """Extract subjects from body content"""
-    if not body_content:
-        return []
-    
-    subjects = []
-    body_text = body_content.get_text().lower()
-    
-    # Common subject keywords
-    subject_keywords = [
-        'accounting', 'finance', 'economics', 'business management',
-        'marketing', 'taxation', 'banking', 'statistics',
-        'graphic design', 'animation', 'ui/ux design', 'web design',
-        'multimedia', 'photography', 'video editing',
-        'physical education', 'sports science', 'exercise physiology',
-        'sports psychology', 'anatomy', 'physiology'
-    ]
-    
-    for keyword in subject_keywords:
-        if keyword in body_text:
-            subjects.append(keyword.title())
-    
-    return list(set(subjects))  # Remove duplicates
 
 def determine_degree_category(source_url, course_title, body_content):
     """Determine degree category based on source URL and content"""
@@ -239,8 +347,8 @@ def determine_degree_category(source_url, course_title, body_content):
     return "General Programs"
 
 def main():
-    """Main scraping function"""
-    print("🚀 Starting simple body-content scraping...")
+    """Main scraping function with enhanced content extraction"""
+    print("🚀 Starting enhanced scraping with hidden content support...")
     
     all_courses = []
     
@@ -251,8 +359,8 @@ def main():
         course_links = extract_course_links_from_body(source_url)
         print(f"Found {len(course_links)} course links")
         
-        # Step 2: Extract info from each course page (title + body)
-        for link_info in course_links[:10]:  # Limit to prevent overload
+        # Step 2: Extract comprehensive info from each course page
+        for link_info in course_links[:15]:  # Increased limit for better coverage
             course_info = extract_course_info_from_page(
                 link_info['url'], 
                 link_info['text'], 
@@ -262,8 +370,10 @@ def main():
             if course_info and len(course_info['course'].split()) >= 3:
                 all_courses.append(course_info)
                 print(f"✅ Added: {course_info['course']}")
+                print(f"   Subjects: {course_info['subjects'][:3]}...")  # Show first 3 subjects
+                print(f"   Curriculum items: {len(course_info['curriculum'])}")
             
-            time.sleep(0.5)  # Be respectful
+            time.sleep(0.7)  # Be respectful
     
     # Remove duplicates
     seen_courses = set()
@@ -275,19 +385,22 @@ def main():
             seen_courses.add(course_key)
             unique_courses.append(course)
     
-    print(f"\n✅ SCRAPING COMPLETE")
+    print(f"\n✅ ENHANCED SCRAPING COMPLETE")
     print(f"📊 Total unique courses: {len(unique_courses)}")
     
     # Save results
-    with open("courses.json", "w", encoding='utf-8') as f:
+    with open("courses_enhanced.json", "w", encoding='utf-8') as f:
         json.dump(unique_courses, f, indent=2, ensure_ascii=False)
     
-    print("💾 Saved to courses.json")
+    print("💾 Saved to courses_enhanced.json")
     
-    # Show sample
-    print("\n📋 Sample courses found:")
-    for i, course in enumerate(unique_courses[:5]):
+    # Show sample with enhanced data
+    print("\n📋 Sample courses with enhanced data:")
+    for i, course in enumerate(unique_courses[:3]):
         print(f"{i+1}. {course['course']}")
+        print(f"   Subjects: {course['subjects'][:5]}")
+        print(f"   Curriculum: {len(course['curriculum'])} items")
+        print(f"   Description: {course['description'][:100]}...")
         print(f"   URL: {course['source_url']}")
         print()
 

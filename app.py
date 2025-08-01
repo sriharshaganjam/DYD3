@@ -312,17 +312,162 @@ def assessment_page():
                     st.session_state.page = "chat"
                     st.rerun()
 
-        def build_profile():
-            # ... (complete function continues)
+def build_profile():
+    """Build student profile from uploaded documents and assessment responses"""
+    try:
+        # Extract marks from marksheet
+        marks = {}
+        if st.session_state.uploaded_files["marksheet"]:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(st.session_state.uploaded_files["marksheet"].getvalue())
+                tmp_file_path = tmp_file.name
+            
+            marks = extract_marks_from_pdf(tmp_file_path)
+            os.unlink(tmp_file_path)  # Clean up temp file
+        
+        # Extract interests from certificates
+        interests_from_certs = []
+        if st.session_state.uploaded_files["certificates"]:
+            cert_paths = []
+            for cert in st.session_state.uploaded_files["certificates"]:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(cert.getvalue())
+                    cert_paths.append(tmp_file.name)
+            
+            interests_from_certs = extract_interests_from_certificates(cert_paths)
+            
+            # Clean up temp files
+            for path in cert_paths:
+                os.unlink(path)
+        
+        # Get assessment responses
+        responses = st.session_state.assessment_responses
+        
+        # Build profile
+        profile = build_student_profile(
+            marks=marks,
+            interests_from_certs=interests_from_certs,
+            degree_level=responses["degree_level"],
+            q1=responses["q1"],  # Career aspiration
+            q2=responses["q2"],  # Work preferences
+            q3=responses["q3"],  # Academic interests
+            q4=responses["q4"]   # Activities
+        )
+        
+        st.session_state.profile = profile
+        
+        # Load courses
+        if st.session_state.courses is None:
+            st.session_state.courses = load_courses()
+        
+        print(f"Profile built successfully: {profile}")
+        
+    except Exception as e:
+        st.error(f"Error building profile: {str(e)}")
+        print(f"Error in build_profile: {e}")
 
-        def chat_page():
-            # TODO: Implement chat page functionality
-            pass
+def chat_page():
+    """Chat interface for course recommendations"""
+    st.markdown('<div class="main-header"><h1>🤖 Your Personal Course Advisor</h1><p>Ask me anything about courses and career paths!</p></div>', unsafe_allow_html=True)
+    
+    # Sidebar with profile summary
+    with st.sidebar:
+        st.markdown("### 📊 Your Profile Summary")
+        
+        if st.session_state.profile:
+            profile = st.session_state.profile
+            
+            # Academic strengths
+            if profile.get('strengths'):
+                st.markdown("**🎯 Academic Strengths:**")
+                for strength in profile['strengths']:
+                    st.markdown(f"• {strength}")
+            
+            # Interests
+            if profile.get('interests'):
+                st.markdown("**💡 Interests:**")
+                for interest in profile['interests']:
+                    st.markdown(f"• {interest}")
+            
+            # Activities and skills
+            if profile.get('activities'):
+                st.markdown("**🏃 Activities:**")
+                for activity in profile['activities']:
+                    st.markdown(f"• {activity}")
+            
+            # Degree level
+            st.markdown(f"**🎓 Seeking:** {profile.get('degree_level', 'Not specified')}")
+        
+        st.markdown("---")
+        if st.button("🔄 Start Over", use_container_width=True):
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Chat interface
+    st.markdown("### 💬 Chat with Your Advisor")
+    
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Initial recommendation if no messages
+    if not st.session_state.messages and st.session_state.profile and st.session_state.courses:
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing your profile and finding the best courses..."):
+                initial_response = get_recommendation_with_context(
+                    st.session_state.profile, 
+                    st.session_state.courses, 
+                    []
+                )
+            
+            st.markdown(initial_response)
+            
+            # Add to message history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": initial_response
+            })
+    
+    # Chat input
+    if prompt := st.chat_input("Ask me about courses, career prospects, or anything else..."):
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Generate assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = get_recommendation_with_context(
+                    st.session_state.profile,
+                    st.session_state.courses,
+                    st.session_state.messages
+                )
+            
+            st.markdown(response)
+            
+            # Add to message history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response
+            })
 
-        def main():
-            # ... (app routing continues)
-            pass
+def main():
+    """Main application router"""
+    # Navigation based on current page
+    if st.session_state.page == "upload":
+        upload_page()
+    elif st.session_state.page == "assessment":
+        assessment_page()
+    elif st.session_state.page == "chat":
+        chat_page()
+    else:
+        # Default to upload page
+        st.session_state.page = "upload"
+        upload_page()
 
-        if __name__ == "__main__":
-            pass
-            main()
+if __name__ == "__main__":
+    main()
