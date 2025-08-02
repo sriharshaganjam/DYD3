@@ -1,6 +1,17 @@
 import streamlit as st
 from profile_builder import extract_marks_from_pdf, extract_interests_from_certificates, build_student_profile
-from course_matcher import load_courses, get_recommendation_with_context
+
+# Quick fix: Try to import enhanced functions, fall back to basic ones
+try:
+    from course_matcher import load_courses, get_recommendation_with_context, test_api_connection
+    API_TEST_AVAILABLE = True
+except ImportError:
+    try:
+        from course_matcher import load_courses, get_recommendation_with_context
+        API_TEST_AVAILABLE = False
+    except ImportError:
+        st.error("❌ Error: Could not import course_matcher functions. Please check the file.")
+        st.stop()
 
 import tempfile
 import os
@@ -74,6 +85,25 @@ st.markdown("""
     margin: 0.3rem 0;
     border-left: 3px solid #2196f3;
     padding-left: 0.5rem;
+}
+
+/* API Status indicators */
+.api-status-good {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+    padding: 0.5rem;
+    border-radius: 5px;
+    margin: 0.5rem 0;
+}
+
+.api-status-bad {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    padding: 0.5rem;
+    border-radius: 5px;
+    margin: 0.5rem 0;
 }
 
 /* Typing animation improvements */
@@ -150,6 +180,38 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+def check_api_status():
+    """Check API status if available"""
+    if API_TEST_AVAILABLE:
+        try:
+            return test_api_connection()
+        except Exception as e:
+            print(f"API test failed: {e}")
+            return False
+    return None
+
+def display_api_status():
+    """Display API status in sidebar"""
+    api_status = check_api_status()
+    
+    if api_status is True:
+        st.markdown("""
+        <div class="api-status-good">
+            ✅ <strong>API Status:</strong> Connected<br>
+            🤖 AI recommendations available
+        </div>
+        """, unsafe_allow_html=True)
+    elif api_status is False:
+        st.markdown("""
+        <div class="api-status-bad">
+            ❌ <strong>API Status:</strong> Connection Failed<br>
+            🔧 Check your MISTRAL_API_KEY in .env file<br>
+            💡 Run <code>python api_diagnostic.py</code> for help
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("🔧 API status check not available")
 
 def display_typing_animation(text, container):
     """Display typing animation for the response"""
@@ -370,8 +432,13 @@ def chat_page():
     """Chat interface for course recommendations"""
     st.markdown('<div class="main-header"><h1>🤖 Your Personal Course Advisor</h1><p>Ask me anything about courses and career paths!</p></div>', unsafe_allow_html=True)
     
-    # Sidebar with profile summary
+    # Sidebar with profile summary and API status
     with st.sidebar:
+        st.markdown("### 🔌 System Status")
+        display_api_status()
+        
+        st.markdown("---")
+        
         st.markdown("### 📊 Your Profile Summary")
         
         if st.session_state.profile:
@@ -417,19 +484,24 @@ def chat_page():
     if not st.session_state.messages and st.session_state.profile and st.session_state.courses:
         with st.chat_message("assistant"):
             with st.spinner("Analyzing your profile and finding the best courses..."):
-                initial_response = get_recommendation_with_context(
-                    st.session_state.profile, 
-                    st.session_state.courses, 
-                    []
-                )
-            
-            st.markdown(initial_response)
-            
-            # Add to message history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": initial_response
-            })
+                try:
+                    initial_response = get_recommendation_with_context(
+                        st.session_state.profile, 
+                        st.session_state.courses, 
+                        []
+                    )
+                    
+                    st.markdown(initial_response)
+                    
+                    # Add to message history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": initial_response
+                    })
+                    
+                except Exception as e:
+                    st.error(f"Error generating initial recommendation: {str(e)}")
+                    st.info("The AI advisor is having technical difficulties. Please try again later.")
     
     # Chat input
     if prompt := st.chat_input("Ask me about courses, career prospects, or anything else..."):
@@ -441,19 +513,24 @@ def chat_page():
         # Generate assistant response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = get_recommendation_with_context(
-                    st.session_state.profile,
-                    st.session_state.courses,
-                    st.session_state.messages
-                )
-            
-            st.markdown(response)
-            
-            # Add to message history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response
-            })
+                try:
+                    response = get_recommendation_with_context(
+                        st.session_state.profile,
+                        st.session_state.courses,
+                        st.session_state.messages
+                    )
+                    
+                    st.markdown(response)
+                    
+                    # Add to message history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    
+                except Exception as e:
+                    st.error(f"Error generating response: {str(e)}")
+                    st.info("The AI advisor encountered an error. Please try rephrasing your question.")
 
 def main():
     """Main application router"""
